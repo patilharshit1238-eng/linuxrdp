@@ -1,23 +1,16 @@
 ```yaml
-name: Ubuntu RDP - Tailscale
+name: Ubuntu RDP
 
 on:
   workflow_dispatch:
 
 jobs:
   rdp:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 350
 
     steps:
-      - name: Connect to Tailscale
-        uses: tailscale/github-action@v4
-        with:
-          authkey: ${{ secrets.TS_AUTHKEY }}
-          hostname: ubuntu-rdp-${{ github.run_id }}
-          version: latest
-
-      - name: Install XFCE and XRDP
+      - name: Install Desktop and XRDP
         run: |
           sudo apt-get update
 
@@ -25,21 +18,15 @@ jobs:
             xfce4 \
             xfce4-goodies \
             xrdp \
-            dbus-x11 \
             xorgxrdp \
-            net-tools \
-            curl \
-            wget \
-            nano
+            dbus-x11
 
-      - name: Create RDP user
+      - name: Create RDP User
         env:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
           sudo useradd -m -s /bin/bash rdpuser || true
-
           echo "rdpuser:${RDP_PASSWORD}" | sudo chpasswd
-
           sudo usermod -aG sudo rdpuser
 
       - name: Configure XFCE
@@ -49,7 +36,6 @@ jobs:
           EOF
 
           sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
-          sudo chmod 755 /home/rdpuser/.xsession
 
           sudo tee /etc/xrdp/startwm.sh > /dev/null <<'EOF'
           #!/bin/sh
@@ -60,7 +46,7 @@ jobs:
           export XDG_CURRENT_DESKTOP=XFCE
           export XDG_SESSION_DESKTOP=xfce
 
-          startxfce4
+          exec startxfce4
           EOF
 
           sudo chmod +x /etc/xrdp/startwm.sh
@@ -74,65 +60,50 @@ jobs:
 
           sudo systemctl status xrdp --no-pager
 
-      - name: Get connection information
-        run: |
-          echo ""
-          echo "=============================================="
-          echo "           UBUNTU RDP READY"
-          echo "=============================================="
-          echo ""
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          version: latest
 
+      - name: Get Tailscale IP
+        run: |
+          echo "=========================================="
+          echo "        UBUNTU RDP IS READY"
+          echo "=========================================="
+          echo ""
           echo "Tailscale IP:"
           tailscale ip -4
-
           echo ""
           echo "RDP address:"
           echo "$(tailscale ip -4):3389"
-
           echo ""
           echo "Username:"
           echo "rdpuser"
-
           echo ""
-          echo "Password:"
-          echo "The value stored in RDP_PASSWORD"
+          echo "=========================================="
 
-          echo ""
-          echo "Windows:"
-          echo "Win + R"
-          echo "mstsc"
-
-          echo ""
-          echo "=============================================="
-
-      - name: Verify RDP
+      - name: Check XRDP
         run: |
-          for i in $(seq 1 20); do
-            if nc -z 127.0.0.1 3389; then
-              echo "XRDP is listening on port 3389."
-              exit 0
-            fi
+          sleep 3
 
-            echo "Waiting for XRDP..."
-            sleep 2
-          done
+          if sudo ss -lntp | grep -q ":3389"; then
+            echo "XRDP is listening on port 3389."
+          else
+            echo "XRDP is NOT listening."
+            sudo journalctl -u xrdp --no-pager -n 100
+            exit 1
+          fi
 
-          echo "XRDP failed to start."
-          sudo journalctl -u xrdp --no-pager -n 100
-
-          exit 1
-
-      - name: Keep runner alive
+      - name: Keep RDP Running
         run: |
           while true; do
-            echo ""
-            echo "=============================================="
+            echo "=========================================="
             echo "RDP SERVER RUNNING"
-            echo "=============================================="
             echo "Time: $(date)"
             echo "Tailscale IP: $(tailscale ip -4)"
             echo "XRDP: $(sudo systemctl is-active xrdp)"
-            echo ""
+            echo "=========================================="
 
             sleep 60
           done
